@@ -1,5 +1,5 @@
 // app.js
-const GOOGLE_SCRIPT_URL = "TU_URL_DE_APPS_SCRIPT_AQUI";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxaZXgvmz9lCwtGffE1A55TkpHqQjuVEODl1fxorba5XF8HKPFvC7fVb2RXCnsPuebv/exec";
 
 let mockData = {
     "Paralelo A": [
