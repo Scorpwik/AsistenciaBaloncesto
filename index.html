@@ -4,21 +4,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Basket Tracker - App Completa</title>
+    <title>Basket Tracker</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
     <header>
         <div class="header-top">
-            <h1 id="headerTitle">🏀 Asistencia</h1>
+            <h1 id="headerTitle">Asistencia</h1>
         </div>
         <div class="controls">
-            <select id="paraleloSelect">
-                <option value="Paralelo A">Paralelo A</option>
-                <option value="Lu/Mi 16:00">Lu/Mi 16:00</option>
-            </select>
-            <input type="date" id="fechaInput">
+            <div class="custom-dropdown" id="customDropdown">
+                <button type="button" class="dropdown-trigger" id="dropdownTrigger">
+                    <span id="selectedParaleloText">Cargando...</span>
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="dropdown-menu" id="dropdownMenu"></div>
+            </div>
+            <input type="text" id="fechaInput" placeholder="Seleccionar fecha" readonly>
         </div>
     </header>
 
@@ -29,26 +33,26 @@
     </div>
 
     <main>
-        <!-- PANEL 1: ASISTENCIA -->
         <section id="panel-asistencia" class="panel active">
-            <button class="btn-global" id="marcarTodosBtn">✓ Marcar todos P (Presentes)</button>
+            <button class="btn-global" id="marcarTodosBtn">Marcar todos Presentes</button>
             <div id="asistenciaList"></div>
         </section>
 
-        <!-- PANEL 2: EDITOR DE ESTUDIANTES -->
         <section id="panel-editor" class="panel">
             <div class="add-student-container">
                 <input type="text" id="newStudentName" placeholder="Nombre del nuevo alumno...">
-                <button class="btn-add" id="btnAddStudent">➕ Agregar</button>
+                <button class="btn-add" id="btnAddStudent">Agregar</button>
             </div>
             <div id="editorList"></div>
         </section>
 
-        <!-- PANEL 3: HISTORIAL -->
         <section id="panel-historial" class="panel">
-            <button class="btn-global" id="btnFetchHistory" style="color:var(--dark);">📅 Cargar Historial de esta Fecha</button>
-            <div id="historialList" style="padding: 15px; text-align: center; color: #666;">
-                Selecciona una fecha y presiona "Cargar Historial"
+            <button class="btn-global" id="btnFetchHistory">Cargar Historial de esta Fecha</button>
+            <div id="historialList" class="empty-state">
+                Selecciona una fecha y presiona Cargar Historial
+            </div>
+            <div id="historialActionContainer" style="padding: 15px; display: none;">
+                <button class="btn-save-edit" id="btnSaveHistoryEdits" style="width: 100%; padding: 14px; font-size: 0.95rem;">Guardar Cambios en Historial</button>
             </div>
         </section>
     </main>
@@ -57,30 +61,34 @@
         <button class="fab visible" id="guardarBtn">Guardar Asistencia</button>
     </div>
 
-    <nav class="bottom-nav">
-        <div class="nav-item active" data-target="panel-asistencia">
-            <span class="nav-icon">📝</span>
-            <span>Asistencia</span>
-        </div>
-        <div class="nav-item" data-target="panel-editor">
-            <span class="nav-icon">👥</span>
-            <span>Editor</span>
-        </div>
-        <div class="nav-item" data-target="panel-historial">
-            <span class="nav-icon">📅</span>
-            <span>Historial</span>
+    <nav class="bottom-nav-wrapper">
+        <div class="bottom-nav-pill">
+            <div class="nav-item active" data-target="panel-asistencia">
+                <span class="nav-text">Asistencia</span>
+            </div>
+            <div class="nav-item" data-target="panel-editor">
+                <span class="nav-text">Editor</span>
+            </div>
+            <div class="nav-item" data-target="panel-historial">
+                <span class="nav-text">Historial</span>
+            </div>
         </div>
     </nav>
 
     <div class="overlay" id="loaderOverlay">
         <div class="spinner" id="spinner"></div>
-        <div class="modal" id="successModal">
-            <h2 id="modalTitle" style="color: var(--primary);">¡Completado!</h2>
-            <p id="modalText">Acción realizada con éxito.</p>
-            <button id="cerrarModalBtn">Aceptar</button>
+        <div class="modal" id="customModal">
+            <h2 id="modalTitle">Atención</h2>
+            <p id="modalText">Mensaje del sistema</p>
+            <div class="modal-buttons" id="modalButtons">
+                <button id="modalPrimaryBtn" class="modal-btn primary">Aceptar</button>
+                <button id="modalSecondaryBtn" class="modal-btn secondary" style="display: none;">Cancelar</button>
+            </div>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

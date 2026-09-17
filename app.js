@@ -1,124 +1,289 @@
 // app.js
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxaZXgvmz9lCwtGffE1A55TkpHqQjuVEODl1fxorba5XF8HKPFvC7fVb2RXCnsPuebv/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyC-1xxiO38re7hNkEEKyl6boBfy-mR_2DpDC3l20lmDSiY4n_GL9cb6ovAFZSW8IYq/exec";
 
-let mockData = {
-    "Paralelo A": [
-        { id: 1, nombre: "Mateo Pérez" }, { id: 2, nombre: "Lucas Gómez" },
-        { id: 3, nombre: "Sofía López" }
-    ],
-    "Lu/Mi 16:00": [
-        { id: 6, nombre: "Juan Castro" }, { id: 7, nombre: "Pedro Torres" }
-    ]
-};
-
-const mockHistory = {
-    "Paralelo A": {
-        "2023-10-01": [
-            { estudiante: "Mateo Pérez", estado: "Presente", notas: "" },
-            { estudiante: "Lucas Gómez", estado: "Falta", notas: "Justificado médica" },
-            { estudiante: "Sofía López", estado: "Atraso", notas: "10 min" }
-        ]
-    }
-};
+let mockData = {};
+let paralelosDisponibles = [];
+let flatpickrInstance = null;
 
 const elements = {
-    paralelo: document.getElementById('paraleloSelect'),
+    customDropdown: document.getElementById('customDropdown'),
+    dropdownTrigger: document.getElementById('dropdownTrigger'),
+    dropdownMenu: document.getElementById('dropdownMenu'),
+    selectedParaleloText: document.getElementById('selectedParaleloText'),
     fecha: document.getElementById('fechaInput'),
     headerTitle: document.getElementById('headerTitle'),
     legendBar: document.getElementById('legendBar'),
     fab: document.getElementById('guardarBtn'),
     navItems: document.querySelectorAll('.nav-item'),
     paneles: document.querySelectorAll('.panel'),
-    
     asistenciaList: document.getElementById('asistenciaList'),
     btnTodos: document.getElementById('marcarTodosBtn'),
-    
     editorList: document.getElementById('editorList'),
     newStudentName: document.getElementById('newStudentName'),
     btnAddStudent: document.getElementById('btnAddStudent'),
-
     historialList: document.getElementById('historialList'),
     btnFetchHistory: document.getElementById('btnFetchHistory'),
-
+    historialActionContainer: document.getElementById('historialActionContainer'),
+    btnSaveHistoryEdits: document.getElementById('btnSaveHistoryEdits'),
     overlay: document.getElementById('loaderOverlay'),
     spinner: document.getElementById('spinner'),
-    modal: document.getElementById('successModal'),
-    btnCerrar: document.getElementById('cerrarModalBtn'),
+    modal: document.getElementById('customModal'),
     modalTitle: document.getElementById('modalTitle'),
-    modalText: document.getElementById('modalText')
+    modalText: document.getElementById('modalText'),
+    modalPrimaryBtn: document.getElementById('modalPrimaryBtn'),
+    modalSecondaryBtn: document.getElementById('modalSecondaryBtn')
 };
 
-elements.fecha.valueAsDate = new Date();
+function showModal(title, text, isConfirm = false, onConfirm = null) {
+    elements.modalTitle.innerText = title;
+    elements.modalText.innerText = text;
+    elements.spinner.style.display = 'none';
+    elements.modal.style.display = 'block';
+    elements.overlay.classList.add('active');
+
+    if (isConfirm) {
+        elements.modalSecondaryBtn.style.display = 'block';
+        elements.modalPrimaryBtn.innerText = "Confirmar";
+        
+        const handlePrimary = () => {
+            cleanup();
+            if (onConfirm) onConfirm();
+        };
+        const handleSecondary = () => {
+            cleanup();
+        };
+        const cleanup = () => {
+            elements.overlay.classList.remove('active');
+            elements.modalPrimaryBtn.removeEventListener('click', handlePrimary);
+            elements.modalSecondaryBtn.removeEventListener('click', handleSecondary);
+        };
+
+        elements.modalPrimaryBtn.addEventListener('click', handlePrimary);
+        elements.modalSecondaryBtn.addEventListener('click', handleSecondary);
+    } else {
+        elements.modalSecondaryBtn.style.display = 'none';
+        elements.modalPrimaryBtn.innerText = "Aceptar";
+        
+        const handleClose = () => {
+            elements.overlay.classList.remove('active');
+            elements.modalPrimaryBtn.removeEventListener('click', handleClose);
+        };
+        elements.modalPrimaryBtn.addEventListener('click', handleClose);
+    }
+}
+
+const savedFecha = localStorage.getItem('selectedFecha') || new Date().toISOString().split('T')[0];
+
+flatpickrInstance = flatpickr("#fechaInput", {
+    locale: "es",
+    dateFormat: "Y-m-d",
+    defaultDate: savedFecha,
+    disableMobile: "true",
+    clickOpens: false,
+    onReady: function(selectedDates, dateStr, instance) {
+        const todayBtn = document.createElement("button");
+        todayBtn.type = "button";
+        todayBtn.className = "flatpickr-today-btn";
+        todayBtn.innerText = "Hoy";
+        todayBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            instance.setDate(new Date(), true);
+            instance.close();
+        });
+        instance.calendarContainer.appendChild(todayBtn);
+    },
+    onChange: function(selectedDates, dateStr) {
+        localStorage.setItem('selectedFecha', dateStr);
+        const activeNav = localStorage.getItem('activeTab') || 'panel-asistencia';
+        if(activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
+    }
+});
+
+elements.fecha.addEventListener('click', (e) => {
+    e.stopPropagation();
+    flatpickrInstance.toggle();
+});
+
+async function cargarDatosIniciales() {
+    elements.overlay.classList.add('active');
+    elements.spinner.style.display = 'block';
+    elements.modal.style.display = 'none';
+    
+    try {
+        const response = await fetch(GOOGLE_SCRIPT_URL);
+        const data = await response.json();
+        
+        if (data && data.alumnos) {
+            mockData = data.alumnos;
+            paralelosDisponibles = data.paralelos || [];
+            actualizarSelector();
+            
+            const tabGuardada = localStorage.getItem('activeTab') || 'panel-asistencia';
+            activarPestana(tabGuardada);
+        }
+    } catch (error) {
+        showModal("Error", "No se pudieron obtener los datos de la hoja.");
+    } finally {
+        elements.spinner.style.display = 'none';
+        elements.overlay.classList.remove('active');
+    }
+}
+
+function actualizarSelector() {
+    const savedParalelo = localStorage.getItem('selectedParalelo');
+    elements.dropdownMenu.innerHTML = '';
+
+    if (paralelosDisponibles.length === 0) {
+        elements.selectedParaleloText.innerText = "Sin paralelos";
+        return;
+    }
+
+    let paraleloActivo = paralelosDisponibles[0];
+    if (savedParalelo && paralelosDisponibles.includes(savedParalelo)) {
+        paraleloActivo = savedParalelo;
+    }
+
+    elements.selectedParaleloText.innerText = paraleloActivo;
+    localStorage.setItem('selectedParalelo', paraleloActivo);
+
+    paralelosDisponibles.forEach(p => {
+        const opt = document.createElement('div');
+        opt.className = `dropdown-option ${p === paraleloActivo ? 'selected' : ''}`;
+        opt.innerText = p;
+        opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elements.selectedParaleloText.innerText = p;
+            localStorage.setItem('selectedParalelo', p);
+            elements.customDropdown.classList.remove('open');
+            
+            document.querySelectorAll('.dropdown-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+
+            const activeNav = localStorage.getItem('activeTab') || 'panel-asistencia';
+            if(activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
+            if(activeNav === 'panel-editor') renderEditor(p);
+            if(activeNav === 'panel-historial') {
+                elements.historialActionContainer.style.display = 'none';
+                elements.historialList.innerHTML = '<div class="empty-state">Paralelo cambiado. Presiona Cargar Historial.</div>';
+            }
+        });
+        elements.dropdownMenu.appendChild(opt);
+    });
+}
+
+elements.dropdownTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    elements.customDropdown.classList.toggle('open');
+});
+
+document.addEventListener('click', () => {
+    elements.customDropdown.classList.remove('open');
+});
+
+function activarPestana(targetId) {
+    const item = Array.from(elements.navItems).find(n => n.getAttribute('data-target') === targetId) || elements.navItems[0];
+    
+    elements.navItems.forEach(nav => nav.classList.remove('active'));
+    elements.paneles.forEach(panel => panel.classList.remove('active'));
+    
+    item.classList.add('active');
+    const idFinal = item.getAttribute('data-target');
+    document.getElementById(idFinal).classList.add('active');
+    localStorage.setItem('activeTab', idFinal);
+
+    const actualParalelo = localStorage.getItem('selectedParalelo');
+
+    if(idFinal === 'panel-asistencia') {
+        elements.headerTitle.innerText = 'Asistencia';
+        elements.legendBar.style.display = 'flex';
+        elements.fab.style.display = 'block';
+        elements.fecha.style.display = 'block';
+        cargarYRenderizarAsistencia();
+    } 
+    else if (idFinal === 'panel-editor') {
+        elements.headerTitle.innerText = 'Editor de Alumnos';
+        elements.legendBar.style.display = 'none';
+        elements.fab.style.display = 'none';
+        elements.fecha.style.display = 'none';
+        renderEditor(actualParalelo);
+    } 
+    else if (idFinal === 'panel-historial') {
+        elements.headerTitle.innerText = 'Historial';
+        elements.legendBar.style.display = 'none';
+        elements.fab.style.display = 'none';
+        elements.fecha.style.display = 'block';
+        elements.historialActionContainer.style.display = 'none';
+        elements.historialList.innerHTML = '<div class="empty-state">Selecciona una fecha y presiona Cargar Historial</div>';
+    }
+}
 
 elements.navItems.forEach(item => {
     item.addEventListener('click', () => {
-        elements.navItems.forEach(nav => nav.classList.remove('active'));
-        elements.paneles.forEach(panel => panel.classList.remove('active'));
-        
-        item.classList.add('active');
-        const targetId = item.getAttribute('data-target');
-        document.getElementById(targetId).classList.add('active');
-
-        if(targetId === 'panel-asistencia') {
-            elements.headerTitle.innerHTML = '🏀 Asistencia';
-            elements.legendBar.style.display = 'flex';
-            elements.fab.style.display = 'block';
-            elements.fecha.style.display = 'block';
-            renderAsistencia(elements.paralelo.value);
-        } 
-        else if (targetId === 'panel-editor') {
-            elements.headerTitle.innerHTML = '👥 Editor de Alumnos';
-            elements.legendBar.style.display = 'none';
-            elements.fab.style.display = 'none';
-            elements.fecha.style.display = 'none';
-            renderEditor(elements.paralelo.value);
-        } 
-        else if (targetId === 'panel-historial') {
-            elements.headerTitle.innerHTML = '📅 Historial';
-            elements.legendBar.style.display = 'none';
-            elements.fab.style.display = 'none';
-            elements.fecha.style.display = 'block';
-            elements.historialList.innerHTML = '<div style="padding:15px;text-align:center;color:#666;">Selecciona una fecha y presiona "Cargar Historial"</div>';
-        }
+        activarPestana(item.getAttribute('data-target'));
     });
 });
 
-elements.paralelo.addEventListener('change', (e) => {
-    const activeNav = document.querySelector('.nav-item.active').getAttribute('data-target');
-    if(activeNav === 'panel-asistencia') renderAsistencia(e.target.value);
-    if(activeNav === 'panel-editor') renderEditor(e.target.value);
-    if(activeNav === 'panel-historial') elements.historialList.innerHTML = '<div style="padding:15px;text-align:center;color:#666;">Paralelo cambiado. Presiona Cargar.</div>';
-});
+async function cargarYRenderizarAsistencia() {
+    const paralelo = localStorage.getItem('selectedParalelo');
+    const fecha = elements.fecha.value;
+    if (!paralelo || !fecha) return;
 
-// PANEL 1: ASISTENCIA
-function renderAsistencia(paralelo) {
+    elements.asistenciaList.innerHTML = '<div class="empty-state">Cargando asistencia...</div>';
+
+    try {
+        const url = `${GOOGLE_SCRIPT_URL}?action=obtener_asistencia&paralelo=${encodeURIComponent(paralelo)}&fecha=${encodeURIComponent(fecha)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        renderAsistencia(paralelo, data.registros || []);
+    } catch (error) {
+        renderAsistencia(paralelo, []);
+    }
+}
+
+function renderAsistencia(paralelo, registrosGuardados = []) {
     elements.asistenciaList.innerHTML = '';
-    (mockData[paralelo] || []).forEach(student => {
+    if (!paralelo || !mockData[paralelo]) return;
+
+    const mapaRegistros = {};
+    registrosGuardados.forEach(r => { mapaRegistros[r.estudiante] = r; });
+
+    const fragment = document.createDocumentFragment();
+
+    mockData[paralelo].forEach((student, index) => {
         const row = document.createElement('div');
         row.className = 'list-row';
         row.dataset.nombre = student.nombre;
+        const radioName = `st-${index}`; 
+        
+        const regExistente = mapaRegistros[student.nombre];
+        const estadoActual = regExistente ? regExistente.estado : '';
+        const notaActual = regExistente ? regExistente.notas || '' : '';
 
         row.innerHTML = `
             <div class="student-info"><span class="student-name">${student.nombre}</span></div>
             <div class="status-group">
                 <label>
-                    <input type="radio" name="st-${student.id}" value="Presente" class="status-radio">
+                    <input type="radio" name="${radioName}" value="Presente" class="status-radio" ${estadoActual === 'Presente' ? 'checked' : ''}>
                     <div class="status-btn">P</div>
                 </label>
                 <label>
-                    <input type="radio" name="st-${student.id}" value="Falta" class="status-radio">
+                    <input type="radio" name="${radioName}" value="Falta" class="status-radio" ${estadoActual === 'Falta' ? 'checked' : ''}>
                     <div class="status-btn">F</div>
                 </label>
                 <label>
-                    <input type="radio" name="st-${student.id}" value="Atraso" class="status-radio">
+                    <input type="radio" name="${radioName}" value="Atraso" class="status-radio" ${estadoActual === 'Atraso' ? 'checked' : ''}>
                     <div class="status-btn">A</div>
                 </label>
-                <button class="note-toggle" type="button">✎</button>
+                <button class="note-toggle" type="button">Nota</button>
             </div>
-            <div class="notes-container">
-                <input type="text" class="notes-input" placeholder="Nota rápida...">
+            <div class="notes-container ${notaActual ? 'active' : ''}">
+                <input type="text" class="notes-input" placeholder="Nota rápida..." value="${notaActual}">
             </div>
         `;
+
+        if (estadoActual === 'Presente') row.style.borderColor = 'var(--present)';
+        if (estadoActual === 'Falta') row.style.borderColor = 'var(--absent)';
+        if (estadoActual === 'Atraso') row.style.borderColor = 'var(--late)';
 
         row.querySelector('.note-toggle').addEventListener('click', () => {
             const notesContainer = row.querySelector('.notes-container');
@@ -128,25 +293,30 @@ function renderAsistencia(paralelo) {
 
         row.querySelectorAll('.status-radio').forEach(radio => {
             radio.addEventListener('change', (e) => {
-                row.style.background = e.target.value === 'Presente' ? '#f1f8e9' : 
-                                       e.target.value === 'Falta' ? '#ffebee' : '#fff8e1';
+                row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' : 
+                                       e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
             });
         });
 
-        elements.asistenciaList.appendChild(row);
+        fragment.appendChild(row);
     });
+
+    elements.asistenciaList.appendChild(fragment);
 }
 
 elements.btnTodos.addEventListener('click', () => {
     document.querySelectorAll('#asistenciaList .list-row').forEach(row => {
         const presentRadio = row.querySelector('input[value="Presente"]');
-        if(presentRadio) { presentRadio.checked = true; row.style.background = '#f1f8e9'; }
+        if(presentRadio) { presentRadio.checked = true; row.style.borderColor = 'var(--present)'; }
     });
 });
 
 elements.fab.addEventListener('click', () => {
     const payload = [];
     let incompleto = false;
+    const paralelo = localStorage.getItem('selectedParalelo');
+
+    if (!paralelo) return showModal("Atención", "Selecciona un paralelo primero.");
 
     document.querySelectorAll('#asistenciaList .list-row').forEach(row => {
         const radio = row.querySelector('input[type="radio"]:checked');
@@ -160,133 +330,202 @@ elements.fab.addEventListener('click', () => {
         }
     });
 
-    if (incompleto) return alert("Marca el estado de todos los alumnos.");
+    if (incompleto) return showModal("Incompleto", "Por favor marca el estado de todos los alumnos.");
 
     const requestData = {
         action: "guardar_asistencia",
-        paralelo: elements.paralelo.value,
+        paralelo: paralelo,
         fecha: elements.fecha.value,
         registros: payload
     };
-    enviar(requestData, "Asistencia guardada correctamente");
+    enviar(requestData, "Asistencia registrada exitosamente");
 });
 
-// PANEL 2: EDITOR (Con opción de modificar nombre)
 function renderEditor(paralelo) {
     elements.editorList.innerHTML = '';
-    (mockData[paralelo] || []).forEach((student) => {
+    if (!paralelo || !mockData[paralelo]) return;
+
+    const fragment = document.createDocumentFragment();
+
+    mockData[paralelo].forEach((student, index) => {
         const row = document.createElement('div');
         row.className = 'list-row';
-        row.id = `row-student-${student.id}`;
         row.innerHTML = `
             <div class="student-info">
-                <span class="student-name" id="name-display-${student.id}">${student.nombre}</span>
+                <span class="student-name">${student.nombre}</span>
             </div>
             <div class="editor-actions">
-                <button class="btn-icon" onclick="enableEditStudent(${student.id})">✏️</button>
-                <button class="btn-icon" onclick="deleteStudent(${student.id}, '${paralelo}')">🗑️</button>
+                <button class="btn-icon" onclick="enableEditStudent(${index})">Editar</button>
+                <button class="btn-icon" onclick="deleteStudent(${index}, '${paralelo}')">Eliminar</button>
             </div>
-            <div class="edit-container" id="edit-box-${student.id}" style="display: none;">
-                <input type="text" id="input-edit-${student.id}" value="${student.nombre}">
-                <button class="btn-save-edit" onclick="saveEditStudent(${student.id}, '${paralelo}')">Guardar</button>
-                <button class="btn-cancel-edit" onclick="cancelEditStudent(${student.id})">✕</button>
+            <div class="edit-container" id="edit-box-${index}" style="display: none;">
+                <input type="text" id="input-edit-${index}" value="${student.nombre}">
+                <button class="btn-save-edit" onclick="saveEditStudent(${index}, '${paralelo}')">Guardar</button>
+                <button class="btn-cancel-edit" onclick="cancelEditStudent(${index})">Cancelar</button>
             </div>
         `;
-        elements.editorList.appendChild(row);
+        fragment.appendChild(row);
     });
+
+    elements.editorList.appendChild(fragment);
 }
 
-window.enableEditStudent = function(id) {
-    document.getElementById(`edit-box-${id}`).style.display = 'flex';
-    document.getElementById(`input-edit-${id}`).focus();
+window.enableEditStudent = function(index) {
+    document.getElementById(`edit-box-${index}`).style.display = 'flex';
+    document.getElementById(`input-edit-${index}`).focus();
 };
 
-window.cancelEditStudent = function(id) {
-    document.getElementById(`edit-box-${id}`).style.display = 'none';
+window.cancelEditStudent = function(index) {
+    document.getElementById(`edit-box-${index}`).style.display = 'none';
 };
 
-window.saveEditStudent = function(id, paralelo) {
-    const newName = document.getElementById(`input-edit-${id}`).value.trim();
-    if (!newName) return alert("El nombre no puede estar vacío.");
+window.saveEditStudent = function(index, paralelo) {
+    const newName = document.getElementById(`input-edit-${index}`).value.trim();
+    if (!newName) return showModal("Atención", "El nombre no puede estar vacío.");
 
-    const student = mockData[paralelo].find(s => s.id === id);
-    if (student) {
-        const oldName = student.nombre;
-        student.nombre = newName;
+    const oldName = mockData[paralelo][index].nombre;
+    mockData[paralelo][index].nombre = newName;
 
-        const requestData = { 
-            action: "editar_alumno", 
-            paralelo: paralelo, 
-            id: id, 
-            nombreAnterior: oldName, 
-            nombreNuevo: newName 
-        };
-        enviar(requestData, "Nombre modificado correctamente");
-
-        renderEditor(paralelo);
-    }
+    const requestData = { 
+        action: "editar_alumno", 
+        paralelo: paralelo, 
+        nombreAnterior: oldName, 
+        nombreNuevo: newName 
+    };
+    enviar(requestData, "Nombre actualizado correctamente");
+    renderEditor(paralelo);
 };
 
 elements.btnAddStudent.addEventListener('click', () => {
     const name = elements.newStudentName.value.trim();
-    const paralelo = elements.paralelo.value;
-    if(!name) return alert("Ingresa un nombre.");
+    const paralelo = localStorage.getItem('selectedParalelo');
+    if(!name || !paralelo) return showModal("Atención", "Ingresa un nombre válido.");
 
-    const newId = Date.now();
-    mockData[paralelo].push({ id: newId, nombre: name });
+    mockData[paralelo].push({ nombre: name });
     elements.newStudentName.value = '';
 
     const requestData = { action: "agregar_alumno", paralelo: paralelo, nombre: name };
-    enviar(requestData, "Alumno agregado correctamente");
-
+    enviar(requestData, "Alumno agregado al registro");
     renderEditor(paralelo);
 });
 
-window.deleteStudent = function(id, paralelo) {
-    if(!confirm("¿Seguro que deseas eliminar este alumno?")) return;
+window.deleteStudent = function(index, paralelo) {
+    showModal("Eliminar Alumno", "¿Deseas eliminar permanentemente a este alumno?", true, () => {
+        const nameToDelete = mockData[paralelo][index].nombre;
+        mockData[paralelo].splice(index, 1);
 
-    mockData[paralelo] = mockData[paralelo].filter(s => s.id !== id);
-
-    const requestData = { action: "eliminar_alumno", paralelo: paralelo, id: id };
-    enviar(requestData, "Alumno eliminado");
-
-    renderEditor(paralelo);
+        const requestData = { action: "eliminar_alumno", paralelo: paralelo, nombreAnterior: nameToDelete };
+        enviar(requestData, "Alumno eliminado del registro");
+        renderEditor(paralelo);
+    });
 };
 
-// PANEL 3: HISTORIAL
 elements.btnFetchHistory.addEventListener('click', async () => {
     const fecha = elements.fecha.value;
-    const paralelo = elements.paralelo.value;
-    elements.historialList.innerHTML = '<div style="padding:15px;text-align:center;">Cargando...</div>';
+    const paralelo = localStorage.getItem('selectedParalelo');
+    if (!paralelo || !fecha) return showModal("Atención", "Selecciona una fecha válida.");
 
-    setTimeout(() => {
-        const data = mockHistory[paralelo]?.[fecha];
+    elements.historialList.innerHTML = '<div class="empty-state">Cargando registros...</div>';
+    elements.historialActionContainer.style.display = 'none';
 
-        if(!data || data.length === 0) {
-            elements.historialList.innerHTML = '<div style="padding:15px;text-align:center;color:#f44336;">No hay registros para esta fecha.</div>';
+    try {
+        const url = `${GOOGLE_SCRIPT_URL}?action=obtener_asistencia&paralelo=${encodeURIComponent(paralelo)}&fecha=${encodeURIComponent(fecha)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const registros = data.registros || [];
+
+        if (registros.length === 0) {
+            elements.historialList.innerHTML = '<div class="empty-state" style="color:var(--absent);">No existen registros guardados para esta fecha.</div>';
             return;
         }
 
         elements.historialList.innerHTML = '';
-        data.forEach(reg => {
-            const cssClass = reg.estado === 'Presente' ? 'bg-p' : reg.estado === 'Falta' ? 'bg-f' : 'bg-a';
+        const fragment = document.createDocumentFragment();
+
+        registros.forEach((reg, idx) => {
+            const radioName = `hist-${idx}`;
             const row = document.createElement('div');
             row.className = 'list-row';
-            row.style.flexDirection = 'column';
-            row.style.alignItems = 'flex-start';
+            row.dataset.nombre = reg.estudiante;
+            
             row.innerHTML = `
-                <div style="display:flex; justify-content:space-between; width:100%;">
-                    <span class="student-name">${reg.estudiante}</span>
-                    <span class="history-badge ${cssClass}">${reg.estado}</span>
+                <div class="student-info"><span class="student-name">${reg.estudiante}</span></div>
+                <div class="status-group">
+                    <label>
+                        <input type="radio" name="${radioName}" value="Presente" class="status-radio" ${reg.estado === 'Presente' ? 'checked' : ''}>
+                        <div class="status-btn">P</div>
+                    </label>
+                    <label>
+                        <input type="radio" name="${radioName}" value="Falta" class="status-radio" ${reg.estado === 'Falta' ? 'checked' : ''}>
+                        <div class="status-btn">F</div>
+                    </label>
+                    <label>
+                        <input type="radio" name="${radioName}" value="Atraso" class="status-radio" ${reg.estado === 'Atraso' ? 'checked' : ''}>
+                        <div class="status-btn">A</div>
+                    </label>
+                    <button class="note-toggle" type="button">Nota</button>
                 </div>
-                ${reg.notas ? `<div class="history-note">Nota: ${reg.notas}</div>` : ''}
+                <div class="notes-container ${reg.notas ? 'active' : ''}">
+                    <input type="text" class="notes-input" placeholder="Nota..." value="${reg.notas || ''}">
+                </div>
             `;
-            elements.historialList.appendChild(row);
+
+            if (reg.estado === 'Presente') row.style.borderColor = 'var(--present)';
+            if (reg.estado === 'Falta') row.style.borderColor = 'var(--absent)';
+            if (reg.estado === 'Atraso') row.style.borderColor = 'var(--late)';
+
+            row.querySelector('.note-toggle').addEventListener('click', () => {
+                const notesContainer = row.querySelector('.notes-container');
+                notesContainer.classList.toggle('active');
+                if(notesContainer.classList.contains('active')) row.querySelector('.notes-input').focus();
+            });
+
+            row.querySelectorAll('.status-radio').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' : 
+                                           e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
+                });
+            });
+
+            fragment.appendChild(row);
         });
-    }, 800);
+
+        elements.historialList.appendChild(fragment);
+        elements.historialActionContainer.style.display = 'block';
+    } catch (error) {
+        elements.historialList.innerHTML = '<div class="empty-state" style="color:var(--absent);">Error al cargar registros.</div>';
+    }
 });
 
-// FUNCIONES GLOBALES (FETCH)
+elements.btnSaveHistoryEdits.addEventListener('click', () => {
+    const payload = [];
+    let incompleto = false;
+    const paralelo = localStorage.getItem('selectedParalelo');
+    const fecha = elements.fecha.value;
+
+    document.querySelectorAll('#historialList .list-row').forEach(row => {
+        const radio = row.querySelector('input[type="radio"]:checked');
+        if (!radio) incompleto = true;
+        else {
+            payload.push({
+                estudiante: row.dataset.nombre,
+                estado: radio.value,
+                notas: row.querySelector('.notes-input').value
+            });
+        }
+    });
+
+    if (incompleto) return showModal("Atención", "Marca el estado de todos los alumnos.");
+
+    const requestData = {
+        action: "guardar_asistencia",
+        paralelo: paralelo,
+        fecha: fecha,
+        registros: payload
+    };
+    enviar(requestData, "Historial actualizado en Excel");
+});
+
 async function enviar(datos, mensajeExito) {
     elements.overlay.classList.add('active');
     elements.spinner.style.display = 'block';
@@ -295,29 +534,16 @@ async function enviar(datos, mensajeExito) {
     try {
         await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify(datos)
         });
 
         elements.spinner.style.display = 'none';
-        elements.modalTitle.innerText = "¡Completado!";
-        elements.modalText.innerText = mensajeExito;
-        elements.modal.style.display = 'block';
+        showModal("Completado", mensajeExito);
     } catch (error) {
         elements.spinner.style.display = 'none';
-        elements.modalTitle.innerText = "Error";
-        elements.modalTitle.style.color = "var(--absent)";
-        elements.modalText.innerText = "Hubo un problema de conexión.";
-        elements.modal.style.display = 'block';
+        showModal("Error", "Ocurrió un problema de conexión.");
     }
 }
 
-elements.btnCerrar.addEventListener('click', () => {
-    elements.overlay.classList.remove('active');
-    if(document.getElementById('panel-asistencia').classList.contains('active')) {
-        renderAsistencia(elements.paralelo.value);
-    }
-});
-
-renderAsistencia(elements.paralelo.value);
+cargarDatosIniciales();
