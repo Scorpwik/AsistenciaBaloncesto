@@ -791,3 +791,24 @@ input[type="radio"][value="Atraso"]:checked + .status-btn {
 .modal-btn:active {
     transform: scale(0.96);
 }
+.btn-excel {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-input);
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    backdrop-filter: blur(12px);
+    transition: all 0.2s ease;
+}
+
+.btn-excel:hover {
+    background: rgba(16, 185, 129, 0.35);
+    border-color: var(--present);
+}
+
+.btn-excel:active {
+    transform: scale(0.96);
+}
