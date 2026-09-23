@@ -812,3 +812,51 @@ input[type="radio"][value="Atraso"]:checked + .status-btn {
 .btn-excel:active {
     transform: scale(0.96);
 }
+/* AJUSTES EDITOR Y BANNER */
+.add-student-container {
+    padding: 0 12px 10px 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#newStudentBanner {
+    flex: 0 1 110px;
+    padding: 12px 10px;
+}
+
+#newStudentName {
+    flex: 2 1 180px;
+}
+
+.edit-container {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.edit-input-group {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+
+.edit-input-group input {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid var(--glass-border);
+    color: var(--text-main);
+    padding: 10px 12px;
+    border-radius: 10px;
+    outline: none;
+}
+
+.btn-group-edit {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}

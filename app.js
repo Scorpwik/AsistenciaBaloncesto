@@ -1,5 +1,5 @@
 // app.js
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyC-1xxiO38re7hNkEEKyl6boBfy-mR_2DpDC3l20lmDSiY4n_GL9cb6ovAFZSW8IYq/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwI6Sg17BhwYOYJ2HznUQk37Jpb09Y03g2dx3I1lz7iwGknlr6658NanGTwcP81W5M/exec"; // IMPORTANTE: PEGA TU URL
 
 let mockData = {};
 let paralelosDisponibles = [];
@@ -19,6 +19,7 @@ const elements = {
     asistenciaList: document.getElementById('asistenciaList'),
     btnTodos: document.getElementById('marcarTodosBtn'),
     editorList: document.getElementById('editorList'),
+    newStudentBanner: document.getElementById('newStudentBanner'),
     newStudentName: document.getElementById('newStudentName'),
     btnAddStudent: document.getElementById('btnAddStudent'),
     historialList: document.getElementById('historialList'),
@@ -45,19 +46,13 @@ function showModal(title, text, isConfirm = false, onConfirm = null) {
         elements.modalSecondaryBtn.style.display = 'block';
         elements.modalPrimaryBtn.innerText = "Confirmar";
         
-        const handlePrimary = () => {
-            cleanup();
-            if (onConfirm) onConfirm();
-        };
-        const handleSecondary = () => {
-            cleanup();
-        };
+        const handlePrimary = () => { cleanup(); if (onConfirm) onConfirm(); };
+        const handleSecondary = () => { cleanup(); };
         const cleanup = () => {
             elements.overlay.classList.remove('active');
             elements.modalPrimaryBtn.removeEventListener('click', handlePrimary);
             elements.modalSecondaryBtn.removeEventListener('click', handleSecondary);
         };
-
         elements.modalPrimaryBtn.addEventListener('click', handlePrimary);
         elements.modalSecondaryBtn.addEventListener('click', handleSecondary);
     } else {
@@ -117,7 +112,6 @@ async function cargarDatosIniciales() {
             mockData = data.alumnos;
             paralelosDisponibles = data.paralelos || [];
             actualizarSelector();
-            
             const tabGuardada = localStorage.getItem('activeTab') || 'panel-asistencia';
             activarPestana(tabGuardada);
         }
@@ -175,14 +169,10 @@ elements.dropdownTrigger.addEventListener('click', (e) => {
     e.stopPropagation();
     elements.customDropdown.classList.toggle('open');
 });
-
-document.addEventListener('click', () => {
-    elements.customDropdown.classList.remove('open');
-});
+document.addEventListener('click', () => { elements.customDropdown.classList.remove('open'); });
 
 function activarPestana(targetId) {
     const item = Array.from(elements.navItems).find(n => n.getAttribute('data-target') === targetId) || elements.navItems[0];
-    
     elements.navItems.forEach(nav => nav.classList.remove('active'));
     elements.paneles.forEach(panel => panel.classList.remove('active'));
     
@@ -217,11 +207,7 @@ function activarPestana(targetId) {
     }
 }
 
-elements.navItems.forEach(item => {
-    item.addEventListener('click', () => {
-        activarPestana(item.getAttribute('data-target'));
-    });
-});
+elements.navItems.forEach(item => { item.addEventListener('click', () => { activarPestana(item.getAttribute('data-target')); }); });
 
 async function cargarYRenderizarAsistencia() {
     const paralelo = localStorage.getItem('selectedParalelo');
@@ -246,13 +232,13 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
 
     const mapaRegistros = {};
     registrosGuardados.forEach(r => { mapaRegistros[r.estudiante] = r; });
-
     const fragment = document.createDocumentFragment();
 
     mockData[paralelo].forEach((student, index) => {
         const row = document.createElement('div');
         row.className = 'list-row';
         row.dataset.nombre = student.nombre;
+        row.dataset.banner = student.banner;
         const radioName = `st-${index}`; 
         
         const regExistente = mapaRegistros[student.nombre];
@@ -260,7 +246,10 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
         const notaActual = regExistente ? regExistente.notas || '' : '';
 
         row.innerHTML = `
-            <div class="student-info"><span class="student-name">${student.nombre}</span></div>
+            <div class="student-info">
+                <span class="student-name">${student.nombre}</span><br>
+                <small style="color:var(--text-muted); font-size:0.75rem; letter-spacing:0.5px;">Código: ${student.banner || 'N/A'}</small>
+            </div>
             <div class="status-group">
                 <label>
                     <input type="radio" name="${radioName}" value="Presente" class="status-radio" ${estadoActual === 'Presente' ? 'checked' : ''}>
@@ -297,7 +286,6 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
                                        e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
             });
         });
-
         fragment.appendChild(row);
     });
 
@@ -323,6 +311,7 @@ elements.fab.addEventListener('click', () => {
         if (!radio) incompleto = true;
         else {
             payload.push({
+                banner: row.dataset.banner,
                 estudiante: row.dataset.nombre,
                 estado: radio.value,
                 notas: row.querySelector('.notes-input').value
@@ -344,7 +333,6 @@ elements.fab.addEventListener('click', () => {
 function renderEditor(paralelo) {
     elements.editorList.innerHTML = '';
     if (!paralelo || !mockData[paralelo]) return;
-
     const fragment = document.createDocumentFragment();
 
     mockData[paralelo].forEach((student, index) => {
@@ -352,27 +340,32 @@ function renderEditor(paralelo) {
         row.className = 'list-row';
         row.innerHTML = `
             <div class="student-info">
-                <span class="student-name">${student.nombre}</span>
+                <span class="student-name">${student.nombre}</span><br>
+                <small style="color:var(--text-muted); font-size:0.75rem;">Código: ${student.banner || 'N/A'}</small>
             </div>
             <div class="editor-actions">
                 <button class="btn-icon" onclick="enableEditStudent(${index})">Editar</button>
                 <button class="btn-icon" onclick="deleteStudent(${index}, '${paralelo}')">Eliminar</button>
             </div>
             <div class="edit-container" id="edit-box-${index}" style="display: none;">
-                <input type="text" id="input-edit-${index}" value="${student.nombre}">
-                <button class="btn-save-edit" onclick="saveEditStudent(${index}, '${paralelo}')">Guardar</button>
-                <button class="btn-cancel-edit" onclick="cancelEditStudent(${index})">Cancelar</button>
+                <div class="edit-input-group">
+                    <input type="text" id="input-edit-banner-${index}" value="${student.banner}" placeholder="Código" style="flex:1;">
+                    <input type="text" id="input-edit-nombre-${index}" value="${student.nombre}" placeholder="Nombre" style="flex:2;">
+                </div>
+                <div class="btn-group-edit">
+                    <button class="btn-save-edit" onclick="saveEditStudent(${index}, '${paralelo}')" style="flex:1;">Guardar</button>
+                    <button class="btn-cancel-edit" onclick="cancelEditStudent(${index})" style="flex:1;">Cancelar</button>
+                </div>
             </div>
         `;
         fragment.appendChild(row);
     });
-
     elements.editorList.appendChild(fragment);
 }
 
 window.enableEditStudent = function(index) {
     document.getElementById(`edit-box-${index}`).style.display = 'flex';
-    document.getElementById(`input-edit-${index}`).focus();
+    document.getElementById(`input-edit-nombre-${index}`).focus();
 };
 
 window.cancelEditStudent = function(index) {
@@ -380,40 +373,46 @@ window.cancelEditStudent = function(index) {
 };
 
 window.saveEditStudent = function(index, paralelo) {
-    const newName = document.getElementById(`input-edit-${index}`).value.trim();
+    const newBanner = document.getElementById(`input-edit-banner-${index}`).value.trim();
+    const newName = document.getElementById(`input-edit-nombre-${index}`).value.trim();
     if (!newName) return showModal("Atención", "El nombre no puede estar vacío.");
 
     const oldName = mockData[paralelo][index].nombre;
+    const oldBanner = mockData[paralelo][index].banner;
+    mockData[paralelo][index].banner = newBanner;
     mockData[paralelo][index].nombre = newName;
 
     const requestData = { 
         action: "editar_alumno", 
         paralelo: paralelo, 
+        bannerAnterior: oldBanner,
         nombreAnterior: oldName, 
+        bannerNuevo: newBanner,
         nombreNuevo: newName 
     };
-    enviar(requestData, "Nombre actualizado correctamente");
+    enviar(requestData, "Datos y registros de asistencia actualizados");
     renderEditor(paralelo);
 };
 
 elements.btnAddStudent.addEventListener('click', () => {
+    const banner = elements.newStudentBanner.value.trim();
     const name = elements.newStudentName.value.trim();
     const paralelo = localStorage.getItem('selectedParalelo');
-    if(!name || !paralelo) return showModal("Atención", "Ingresa un nombre válido.");
+    if(!name || !paralelo) return showModal("Atención", "Selecciona un paralelo e ingresa un nombre válido.");
 
-    mockData[paralelo].push({ nombre: name });
+    mockData[paralelo].push({ banner: banner, nombre: name });
+    elements.newStudentBanner.value = '';
     elements.newStudentName.value = '';
 
-    const requestData = { action: "agregar_alumno", paralelo: paralelo, nombre: name };
+    const requestData = { action: "agregar_alumno", paralelo: paralelo, banner: banner, nombre: name };
     enviar(requestData, "Alumno agregado al registro");
     renderEditor(paralelo);
 });
 
 window.deleteStudent = function(index, paralelo) {
-    showModal("Eliminar Alumno", "¿Deseas eliminar permanentemente a este alumno?", true, () => {
+    showModal("Eliminar Alumno", "¿Deseas eliminar permanentemente a este alumno de la lista?", true, () => {
         const nameToDelete = mockData[paralelo][index].nombre;
         mockData[paralelo].splice(index, 1);
-
         const requestData = { action: "eliminar_alumno", paralelo: paralelo, nombreAnterior: nameToDelete };
         enviar(requestData, "Alumno eliminado del registro");
         renderEditor(paralelo);
@@ -447,9 +446,13 @@ elements.btnFetchHistory.addEventListener('click', async () => {
             const row = document.createElement('div');
             row.className = 'list-row';
             row.dataset.nombre = reg.estudiante;
+            row.dataset.banner = reg.banner;
             
             row.innerHTML = `
-                <div class="student-info"><span class="student-name">${reg.estudiante}</span></div>
+                <div class="student-info">
+                    <span class="student-name">${reg.estudiante}</span><br>
+                    <small style="color:var(--text-muted); font-size:0.75rem;">Código: ${reg.banner || 'N/A'}</small>
+                </div>
                 <div class="status-group">
                     <label>
                         <input type="radio" name="${radioName}" value="Presente" class="status-radio" ${reg.estado === 'Presente' ? 'checked' : ''}>
@@ -486,7 +489,6 @@ elements.btnFetchHistory.addEventListener('click', async () => {
                                            e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
                 });
             });
-
             fragment.appendChild(row);
         });
 
@@ -508,6 +510,7 @@ elements.btnSaveHistoryEdits.addEventListener('click', () => {
         if (!radio) incompleto = true;
         else {
             payload.push({
+                banner: row.dataset.banner,
                 estudiante: row.dataset.nombre,
                 estado: radio.value,
                 notas: row.querySelector('.notes-input').value
@@ -517,12 +520,7 @@ elements.btnSaveHistoryEdits.addEventListener('click', () => {
 
     if (incompleto) return showModal("Atención", "Marca el estado de todos los alumnos.");
 
-    const requestData = {
-        action: "guardar_asistencia",
-        paralelo: paralelo,
-        fecha: fecha,
-        registros: payload
-    };
+    const requestData = { action: "guardar_asistencia", paralelo: paralelo, fecha: fecha, registros: payload };
     enviar(requestData, "Historial actualizado en Excel");
 });
 
@@ -537,7 +535,6 @@ async function enviar(datos, mensajeExito) {
             headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify(datos)
         });
-
         elements.spinner.style.display = 'none';
         showModal("Completado", mensajeExito);
     } catch (error) {
