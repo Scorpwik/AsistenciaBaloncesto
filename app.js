@@ -1,5 +1,5 @@
 // app.js
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwI6Sg17BhwYOYJ2HznUQk37Jpb09Y03g2dx3I1lz7iwGknlr6658NanGTwcP81W5M/exec"; // IMPORTANTE: PEGA TU URL
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwprbB4h5Jb2NT-4sa-zC-PHbdHbAwkADddYZxzpSDkTlwlhvqjHc_9ruUP1nNi-6Z-/exec"; // IMPORTANTE: PEGA TU URL
 
 let mockData = {};
 let paralelosDisponibles = [];
