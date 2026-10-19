@@ -1,5 +1,6 @@
-// app.js
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwprbB4h5Jb2NT-4sa-zC-PHbdHbAwkADddYZxzpSDkTlwlhvqjHc_9ruUP1nNi-6Z-/exec"; // IMPORTANTE: PEGA TU URL
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwROvO2s-PSKcr8RVTyAjYKh2QiaCCzoZD26tDXuv7TyJqqs94_q3Pd5MLUH946CVSf/exec"; // NO OLVIDES REEMPLAZAR ESTA URL
+const CACHE_ALUMNOS = "basketCacheAlumnos";
+const CACHE_ASISTENCIA = "basketCacheAsistencia";
 
 let mockData = {};
 let paralelosDisponibles = [];
@@ -45,7 +46,7 @@ function showModal(title, text, isConfirm = false, onConfirm = null) {
     if (isConfirm) {
         elements.modalSecondaryBtn.style.display = 'block';
         elements.modalPrimaryBtn.innerText = "Confirmar";
-        
+
         const handlePrimary = () => { cleanup(); if (onConfirm) onConfirm(); };
         const handleSecondary = () => { cleanup(); };
         const cleanup = () => {
@@ -58,7 +59,7 @@ function showModal(title, text, isConfirm = false, onConfirm = null) {
     } else {
         elements.modalSecondaryBtn.style.display = 'none';
         elements.modalPrimaryBtn.innerText = "Aceptar";
-        
+
         const handleClose = () => {
             elements.overlay.classList.remove('active');
             elements.modalPrimaryBtn.removeEventListener('click', handleClose);
@@ -75,22 +76,22 @@ flatpickrInstance = flatpickr("#fechaInput", {
     defaultDate: savedFecha,
     disableMobile: "true",
     clickOpens: false,
-    onReady: function(selectedDates, dateStr, instance) {
+    onReady: function (selectedDates, dateStr, instance) {
         const todayBtn = document.createElement("button");
         todayBtn.type = "button";
         todayBtn.className = "flatpickr-today-btn";
         todayBtn.innerText = "Hoy";
-        todayBtn.addEventListener("click", function(e) {
+        todayBtn.addEventListener("click", function (e) {
             e.stopPropagation();
             instance.setDate(new Date(), true);
             instance.close();
         });
         instance.calendarContainer.appendChild(todayBtn);
     },
-    onChange: function(selectedDates, dateStr) {
+    onChange: function (selectedDates, dateStr) {
         localStorage.setItem('selectedFecha', dateStr);
         const activeNav = localStorage.getItem('activeTab') || 'panel-asistencia';
-        if(activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
+        if (activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
     }
 });
 
@@ -99,24 +100,100 @@ elements.fecha.addEventListener('click', (e) => {
     flatpickrInstance.toggle();
 });
 
-async function cargarDatosIniciales() {
-    elements.overlay.classList.add('active');
-    elements.spinner.style.display = 'block';
-    elements.modal.style.display = 'none';
-    
+function leerCacheAlumnos() {
     try {
-        const response = await fetch(GOOGLE_SCRIPT_URL);
+        const data = JSON.parse(localStorage.getItem(CACHE_ALUMNOS) || "null");
+        if (data && data.alumnos && Array.isArray(data.paralelos)) return data;
+    } catch (error) { /* cache inválida */ }
+    return null;
+}
+
+function guardarCacheAlumnos(data) {
+    localStorage.setItem(CACHE_ALUMNOS, JSON.stringify({
+        alumnos: data.alumnos,
+        paralelos: data.paralelos || []
+    }));
+}
+
+function claveAsistencia(paralelo, fecha) {
+    return `${paralelo}|${fecha}`;
+}
+
+function leerCacheAsistencia(paralelo, fecha) {
+    try {
+        const data = JSON.parse(localStorage.getItem(CACHE_ASISTENCIA) || "null");
+        if (data && data.clave === claveAsistencia(paralelo, fecha) && Array.isArray(data.registros)) {
+            return data.registros;
+        }
+    } catch (error) { /* cache inválida */ }
+    return null;
+}
+
+function guardarCacheAsistencia(paralelo, fecha, registros) {
+    localStorage.setItem(CACHE_ASISTENCIA, JSON.stringify({
+        clave: claveAsistencia(paralelo, fecha),
+        registros: registros || []
+    }));
+}
+
+function aplicarAlumnos(data) {
+    mockData = data.alumnos;
+    paralelosDisponibles = data.paralelos || [];
+    actualizarSelector();
+}
+
+async function cargarDatosIniciales() {
+    const cache = leerCacheAlumnos();
+    const tabGuardada = localStorage.getItem('activeTab') || 'panel-asistencia';
+
+    if (cache) {
+        aplicarAlumnos(cache);
+        activarPestana(tabGuardada, { skipFetch: true });
+        const paraleloCache = localStorage.getItem('selectedParalelo');
+        const fechaCache = elements.fecha.value;
+        const registrosCache = leerCacheAsistencia(paraleloCache, fechaCache);
+        if (tabGuardada === 'panel-asistencia' && registrosCache) {
+            renderAsistencia(paraleloCache, registrosCache);
+        } else if (tabGuardada === 'panel-asistencia') {
+            elements.asistenciaList.innerHTML = '<div class="empty-state">Actualizando asistencia...</div>';
+        }
+    } else {
+        elements.overlay.classList.add('active');
+        elements.spinner.style.display = 'block';
+        elements.modal.style.display = 'none';
+    }
+
+    try {
+        const paralelo = localStorage.getItem('selectedParalelo') || '';
+        const fecha = elements.fecha.value;
+        const params = new URLSearchParams();
+        params.set('incluir_asistencia', '1');
+        if (paralelo) params.set('paralelo', paralelo);
+        if (fecha) params.set('fecha', fecha);
+        const url = `${GOOGLE_SCRIPT_URL}?${params}`;
+        const response = await fetch(url);
         const data = await response.json();
-        
+
         if (data && data.alumnos) {
-            mockData = data.alumnos;
-            paralelosDisponibles = data.paralelos || [];
-            actualizarSelector();
-            const tabGuardada = localStorage.getItem('activeTab') || 'panel-asistencia';
-            activarPestana(tabGuardada);
+            aplicarAlumnos(data);
+            guardarCacheAlumnos(data);
+            const tab = localStorage.getItem('activeTab') || 'panel-asistencia';
+            const paraleloActivo = localStorage.getItem('selectedParalelo');
+            if (tab === 'panel-asistencia') {
+                if (Array.isArray(data.registros)) {
+                    guardarCacheAsistencia(paraleloActivo, fecha, data.registros);
+                    renderAsistencia(paraleloActivo, data.registros);
+                } else {
+                    await cargarYRenderizarAsistencia();
+                }
+            } else if (!cache) {
+                activarPestana(tab);
+            } else if (tab === 'panel-editor') {
+                renderEditor(paraleloActivo);
+            }
         }
     } catch (error) {
-        showModal("Error", "No se pudieron obtener los datos de la hoja.");
+        if (!cache) showModal("Error", "No se pudieron obtener los datos de la hoja.");
     } finally {
         elements.spinner.style.display = 'none';
         elements.overlay.classList.remove('active');
@@ -149,14 +226,14 @@ function actualizarSelector() {
             elements.selectedParaleloText.innerText = p;
             localStorage.setItem('selectedParalelo', p);
             elements.customDropdown.classList.remove('open');
-            
+
             document.querySelectorAll('.dropdown-option').forEach(o => o.classList.remove('selected'));
             opt.classList.add('selected');
 
             const activeNav = localStorage.getItem('activeTab') || 'panel-asistencia';
-            if(activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
-            if(activeNav === 'panel-editor') renderEditor(p);
-            if(activeNav === 'panel-historial') {
+            if (activeNav === 'panel-asistencia') cargarYRenderizarAsistencia();
+            if (activeNav === 'panel-editor') renderEditor(p);
+            if (activeNav === 'panel-historial') {
                 elements.historialActionContainer.style.display = 'none';
                 elements.historialList.innerHTML = '<div class="empty-state">Paralelo cambiado. Presiona Cargar Historial.</div>';
             }
@@ -171,11 +248,11 @@ elements.dropdownTrigger.addEventListener('click', (e) => {
 });
 document.addEventListener('click', () => { elements.customDropdown.classList.remove('open'); });
 
-function activarPestana(targetId) {
+function activarPestana(targetId, opciones = {}) {
     const item = Array.from(elements.navItems).find(n => n.getAttribute('data-target') === targetId) || elements.navItems[0];
     elements.navItems.forEach(nav => nav.classList.remove('active'));
     elements.paneles.forEach(panel => panel.classList.remove('active'));
-    
+
     item.classList.add('active');
     const idFinal = item.getAttribute('data-target');
     document.getElementById(idFinal).classList.add('active');
@@ -183,20 +260,20 @@ function activarPestana(targetId) {
 
     const actualParalelo = localStorage.getItem('selectedParalelo');
 
-    if(idFinal === 'panel-asistencia') {
+    if (idFinal === 'panel-asistencia') {
         elements.headerTitle.innerText = 'Asistencia';
         elements.legendBar.style.display = 'flex';
         elements.fab.style.display = 'block';
         elements.fecha.style.display = 'block';
-        cargarYRenderizarAsistencia();
-    } 
+        if (!opciones.skipFetch) cargarYRenderizarAsistencia();
+    }
     else if (idFinal === 'panel-editor') {
         elements.headerTitle.innerText = 'Editor de Alumnos';
         elements.legendBar.style.display = 'none';
         elements.fab.style.display = 'none';
         elements.fecha.style.display = 'none';
         renderEditor(actualParalelo);
-    } 
+    }
     else if (idFinal === 'panel-historial') {
         elements.headerTitle.innerText = 'Historial';
         elements.legendBar.style.display = 'none';
@@ -214,15 +291,22 @@ async function cargarYRenderizarAsistencia() {
     const fecha = elements.fecha.value;
     if (!paralelo || !fecha) return;
 
-    elements.asistenciaList.innerHTML = '<div class="empty-state">Cargando asistencia...</div>';
+    const cacheRegistros = leerCacheAsistencia(paralelo, fecha);
+    if (cacheRegistros && mockData[paralelo]) {
+        renderAsistencia(paralelo, cacheRegistros);
+    } else {
+        elements.asistenciaList.innerHTML = '<div class="empty-state">Cargando asistencia...</div>';
+    }
 
     try {
         const url = `${GOOGLE_SCRIPT_URL}?action=obtener_asistencia&paralelo=${encodeURIComponent(paralelo)}&fecha=${encodeURIComponent(fecha)}`;
         const response = await fetch(url);
         const data = await response.json();
-        renderAsistencia(paralelo, data.registros || []);
+        const registros = data.registros || [];
+        guardarCacheAsistencia(paralelo, fecha, registros);
+        renderAsistencia(paralelo, registros);
     } catch (error) {
-        renderAsistencia(paralelo, []);
+        if (!cacheRegistros) renderAsistencia(paralelo, []);
     }
 }
 
@@ -239,8 +323,8 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
         row.className = 'list-row';
         row.dataset.nombre = student.nombre;
         row.dataset.banner = student.banner;
-        const radioName = `st-${index}`; 
-        
+        const radioName = `st-${index}`;
+
         const regExistente = mapaRegistros[student.nombre];
         const estadoActual = regExistente ? regExistente.estado : '';
         const notaActual = regExistente ? regExistente.notas || '' : '';
@@ -277,13 +361,13 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
         row.querySelector('.note-toggle').addEventListener('click', () => {
             const notesContainer = row.querySelector('.notes-container');
             notesContainer.classList.toggle('active');
-            if(notesContainer.classList.contains('active')) row.querySelector('.notes-input').focus();
+            if (notesContainer.classList.contains('active')) row.querySelector('.notes-input').focus();
         });
 
         row.querySelectorAll('.status-radio').forEach(radio => {
             radio.addEventListener('change', (e) => {
-                row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' : 
-                                       e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
+                row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' :
+                    e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
             });
         });
         fragment.appendChild(row);
@@ -295,7 +379,7 @@ function renderAsistencia(paralelo, registrosGuardados = []) {
 elements.btnTodos.addEventListener('click', () => {
     document.querySelectorAll('#asistenciaList .list-row').forEach(row => {
         const presentRadio = row.querySelector('input[value="Presente"]');
-        if(presentRadio) { presentRadio.checked = true; row.style.borderColor = 'var(--present)'; }
+        if (presentRadio) { presentRadio.checked = true; row.style.borderColor = 'var(--present)'; }
     });
 });
 
@@ -327,13 +411,20 @@ elements.fab.addEventListener('click', () => {
         fecha: elements.fecha.value,
         registros: payload
     };
-    enviar(requestData, "Asistencia registrada exitosamente");
+    enviar(requestData, "Asistencia registrada exitosamente", () => {
+        guardarCacheAsistencia(paralelo, elements.fecha.value, payload);
+    });
 });
 
 function renderEditor(paralelo) {
     elements.editorList.innerHTML = '';
     if (!paralelo || !mockData[paralelo]) return;
     const fragment = document.createDocumentFragment();
+
+    // Generamos las opciones de paralelos para el dropdown interno del editor
+    const paralelosOptions = paralelosDisponibles.map(p =>
+        `<option value="${p}" ${p === paralelo ? 'selected' : ''}>${p}</option>`
+    ).join('');
 
     mockData[paralelo].forEach((student, index) => {
         const row = document.createElement('div');
@@ -349,11 +440,16 @@ function renderEditor(paralelo) {
             </div>
             <div class="edit-container" id="edit-box-${index}" style="display: none;">
                 <div class="edit-input-group">
-                    <input type="text" id="input-edit-banner-${index}" value="${student.banner}" placeholder="Código" style="flex:1;">
-                    <input type="text" id="input-edit-nombre-${index}" value="${student.nombre}" placeholder="Nombre" style="flex:2;">
+                    <select id="input-edit-paralelo-${index}" style="flex:1; background: rgba(15, 23, 42, 0.7); border: 1px solid var(--glass-border); color: var(--text-main); border-radius: 10px; padding: 10px; outline: none;">
+                        ${paralelosOptions}
+                    </select>
+                    <input type="text" id="input-edit-banner-${index}" value="${student.banner}" placeholder="Código Banner" style="flex:1;">
                 </div>
-                <div class="btn-group-edit">
-                    <button class="btn-save-edit" onclick="saveEditStudent(${index}, '${paralelo}')" style="flex:1;">Guardar</button>
+                <div class="edit-input-group" style="margin-top: 8px;">
+                    <input type="text" id="input-edit-nombre-${index}" value="${student.nombre}" placeholder="Nombre Completo" style="flex:1;">
+                </div>
+                <div class="btn-group-edit" style="margin-top: 8px;">
+                    <button class="btn-save-edit" onclick="saveEditStudent(${index}, '${paralelo}')" style="flex:1;">Guardar Cambios</button>
                     <button class="btn-cancel-edit" onclick="cancelEditStudent(${index})" style="flex:1;">Cancelar</button>
                 </div>
             </div>
@@ -363,58 +459,80 @@ function renderEditor(paralelo) {
     elements.editorList.appendChild(fragment);
 }
 
-window.enableEditStudent = function(index) {
-    document.getElementById(`edit-box-${index}`).style.display = 'flex';
+window.enableEditStudent = function (index) {
+    document.getElementById(`edit-box-${index}`).style.display = 'block'; // Cambiado de flex a block por los div internos
     document.getElementById(`input-edit-nombre-${index}`).focus();
 };
 
-window.cancelEditStudent = function(index) {
+window.cancelEditStudent = function (index) {
     document.getElementById(`edit-box-${index}`).style.display = 'none';
 };
 
-window.saveEditStudent = function(index, paralelo) {
+window.saveEditStudent = function (index, paraleloAnterior) {
+    const newParalelo = document.getElementById(`input-edit-paralelo-${index}`).value;
     const newBanner = document.getElementById(`input-edit-banner-${index}`).value.trim();
     const newName = document.getElementById(`input-edit-nombre-${index}`).value.trim();
     if (!newName) return showModal("Atención", "El nombre no puede estar vacío.");
 
-    const oldName = mockData[paralelo][index].nombre;
-    const oldBanner = mockData[paralelo][index].banner;
-    mockData[paralelo][index].banner = newBanner;
-    mockData[paralelo][index].nombre = newName;
+    const oldName = mockData[paraleloAnterior][index].nombre;
+    const oldBanner = mockData[paraleloAnterior][index].banner;
 
-    const requestData = { 
-        action: "editar_alumno", 
-        paralelo: paralelo, 
+    if (paraleloAnterior !== newParalelo) {
+        mockData[paraleloAnterior].splice(index, 1);
+        if (!mockData[newParalelo]) mockData[newParalelo] = [];
+        mockData[newParalelo].push({ banner: newBanner, nombre: newName });
+    } else {
+        mockData[paraleloAnterior][index].banner = newBanner;
+        mockData[paraleloAnterior][index].nombre = newName;
+    }
+
+    const requestData = {
+        action: "editar_alumno",
+        paraleloAnterior: paraleloAnterior,
+        paraleloNuevo: newParalelo,
         bannerAnterior: oldBanner,
-        nombreAnterior: oldName, 
+        nombreAnterior: oldName,
         bannerNuevo: newBanner,
-        nombreNuevo: newName 
+        nombreNuevo: newName
     };
-    enviar(requestData, "Datos y registros de asistencia actualizados");
-    renderEditor(paralelo);
+    enviar(requestData, "Datos y registro histórico del alumno actualizados.", () => {
+        guardarCacheAlumnos({ alumnos: mockData, paralelos: paralelosDisponibles });
+    });
+
+    if (paraleloAnterior !== newParalelo) {
+        elements.selectedParaleloText.innerText = newParalelo;
+        localStorage.setItem('selectedParalelo', newParalelo);
+        renderEditor(newParalelo);
+    } else {
+        renderEditor(paraleloAnterior);
+    }
 };
 
 elements.btnAddStudent.addEventListener('click', () => {
     const banner = elements.newStudentBanner.value.trim();
     const name = elements.newStudentName.value.trim();
     const paralelo = localStorage.getItem('selectedParalelo');
-    if(!name || !paralelo) return showModal("Atención", "Selecciona un paralelo e ingresa un nombre válido.");
+    if (!name || !paralelo) return showModal("Atención", "Selecciona un paralelo e ingresa un nombre válido.");
 
     mockData[paralelo].push({ banner: banner, nombre: name });
     elements.newStudentBanner.value = '';
     elements.newStudentName.value = '';
 
     const requestData = { action: "agregar_alumno", paralelo: paralelo, banner: banner, nombre: name };
-    enviar(requestData, "Alumno agregado al registro");
+    enviar(requestData, "Alumno agregado al registro", () => {
+        guardarCacheAlumnos({ alumnos: mockData, paralelos: paralelosDisponibles });
+    });
     renderEditor(paralelo);
 });
 
-window.deleteStudent = function(index, paralelo) {
+window.deleteStudent = function (index, paralelo) {
     showModal("Eliminar Alumno", "¿Deseas eliminar permanentemente a este alumno de la lista?", true, () => {
         const nameToDelete = mockData[paralelo][index].nombre;
         mockData[paralelo].splice(index, 1);
         const requestData = { action: "eliminar_alumno", paralelo: paralelo, nombreAnterior: nameToDelete };
-        enviar(requestData, "Alumno eliminado del registro");
+        enviar(requestData, "Alumno eliminado del registro", () => {
+            guardarCacheAlumnos({ alumnos: mockData, paralelos: paralelosDisponibles });
+        });
         renderEditor(paralelo);
     });
 };
@@ -447,7 +565,7 @@ elements.btnFetchHistory.addEventListener('click', async () => {
             row.className = 'list-row';
             row.dataset.nombre = reg.estudiante;
             row.dataset.banner = reg.banner;
-            
+
             row.innerHTML = `
                 <div class="student-info">
                     <span class="student-name">${reg.estudiante}</span><br>
@@ -480,13 +598,13 @@ elements.btnFetchHistory.addEventListener('click', async () => {
             row.querySelector('.note-toggle').addEventListener('click', () => {
                 const notesContainer = row.querySelector('.notes-container');
                 notesContainer.classList.toggle('active');
-                if(notesContainer.classList.contains('active')) row.querySelector('.notes-input').focus();
+                if (notesContainer.classList.contains('active')) row.querySelector('.notes-input').focus();
             });
 
             row.querySelectorAll('.status-radio').forEach(radio => {
                 radio.addEventListener('change', (e) => {
-                    row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' : 
-                                           e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
+                    row.style.borderColor = e.target.value === 'Presente' ? 'var(--present)' :
+                        e.target.value === 'Falta' ? 'var(--absent)' : 'var(--late)';
                 });
             });
             fragment.appendChild(row);
@@ -521,10 +639,12 @@ elements.btnSaveHistoryEdits.addEventListener('click', () => {
     if (incompleto) return showModal("Atención", "Marca el estado de todos los alumnos.");
 
     const requestData = { action: "guardar_asistencia", paralelo: paralelo, fecha: fecha, registros: payload };
-    enviar(requestData, "Historial actualizado en Excel");
+    enviar(requestData, "Historial actualizado en Excel", () => {
+        guardarCacheAsistencia(paralelo, fecha, payload);
+    });
 });
 
-async function enviar(datos, mensajeExito) {
+async function enviar(datos, mensajeExito, onOk) {
     elements.overlay.classList.add('active');
     elements.spinner.style.display = 'block';
     elements.modal.style.display = 'none';
@@ -535,6 +655,7 @@ async function enviar(datos, mensajeExito) {
             headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify(datos)
         });
+        if (onOk) onOk();
         elements.spinner.style.display = 'none';
         showModal("Completado", mensajeExito);
     } catch (error) {
