@@ -17,11 +17,32 @@ var HOJAS_IGNORADAS = {
   Lista_Estudiantes: true
 };
 
+var MARCA_SESION = "__FECHA__";
+var DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+var COLOR_SESION = "#2c2a26";
+var COLOR_DIA_A = "#ece8e1";
+var COLOR_DIA_B = "#f7f5f1";
+var COLOR_PRESENTE = "#3f5c4a";
+var COLOR_FALTA = "#7a3e3e";
+var COLOR_ATRASO = "#8a6a3b";
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("🏀 Basket Tracker")
+    .addItem("Agrupar fechas en esta hoja", "menuOrganizarVista")
     .addItem("Activar Sincronización Automática", "configurarSincronizacion")
     .addToUi();
+}
+
+function menuOrganizarVista() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hoja = ss.getActiveSheet();
+  if (esHojaIgnorada(hoja.getName())) {
+    ss.getUi().alert("Abre una hoja de horario (Horario1, Horario2...) y vuelve a intentar.");
+    return;
+  }
+  organizarVistaAsistencia(hoja, ss.getSpreadsheetTimeZone(), "");
+  ss.getUi().alert("Listo. A la izquierda de las filas aparecen + y − para abrir o cerrar cada fecha.");
 }
 
 function configurarSincronizacion() {
@@ -117,6 +138,8 @@ function asegurarHojaAsistencia(sheet, paralelo) {
     targetSheet.getRange("A1:E1").setValues([["Fecha", "Banner", "Estudiante", "Estado", "Notas"]]);
     targetSheet.getRange("A1:E1").setFontWeight("bold");
     asegurarFormatoEstado(targetSheet);
+    targetSheet.getRange("A:A").setNumberFormat("yyyy-mm-dd");
+    targetSheet.getRange("B:B").setNumberFormat("@");
     return targetSheet;
   }
   var lastCol = Math.max(1, targetSheet.getLastColumn());
@@ -126,25 +149,42 @@ function asegurarHojaAsistencia(sheet, paralelo) {
     targetSheet.getRange("B1").setValue("Banner");
   }
   asegurarFormatoEstado(targetSheet);
+  targetSheet.getRange("A:A").setNumberFormat("yyyy-mm-dd");
+  targetSheet.getRange("B:B").setNumberFormat("@");
   return targetSheet;
 }
 
 function asegurarFormatoEstado(targetSheet) {
-  var rules = targetSheet.getConditionalFormatRules() || [];
-  var yaTiene = rules.some(function (rule) {
-    var cond = rule.getBooleanCondition();
-    if (!cond) return false;
-    var vals = cond.getValues() || [];
-    return vals.join(" ").indexOf("Presente") !== -1;
-  });
+  var rules = [];
+  try {
+    rules = targetSheet.getConditionalFormatRules() || [];
+  } catch (e) {
+    return;
+  }
+  var yaTiene = false;
+  for (var i = 0; i < rules.length; i++) {
+    try {
+      var cond = rules[i].getBooleanCondition();
+      if (!cond) continue;
+      var vals = [];
+      if (typeof cond.getCriteriaValues === "function") vals = cond.getCriteriaValues() || [];
+      else if (typeof cond.getValues === "function") vals = cond.getValues() || [];
+      if (vals.join(" ").indexOf("Presente") !== -1) {
+        yaTiene = true;
+        break;
+      }
+    } catch (e2) {}
+  }
   if (yaTiene) return;
-  var rango = targetSheet.getRange("D2:D");
-  rules.push(
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Presente").setBackground("#10b981").setFontColor("#FFFFFF").setRanges([rango]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Falta").setBackground("#ef4444").setFontColor("#FFFFFF").setRanges([rango]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Atraso").setBackground("#f59e0b").setFontColor("#000000").setRanges([rango]).build()
-  );
-  targetSheet.setConditionalFormatRules(rules);
+  try {
+    var rango = targetSheet.getRange("D2:D");
+    rules.push(
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Presente").setBackground(COLOR_PRESENTE).setFontColor("#FFFFFF").setRanges([rango]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Falta").setBackground(COLOR_FALTA).setFontColor("#FFFFFF").setRanges([rango]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Atraso").setBackground(COLOR_ATRASO).setFontColor("#FFFFFF").setRanges([rango]).build()
+    );
+    targetSheet.setConditionalFormatRules(rules);
+  } catch (e3) {}
 }
 
 function listarAlumnos(sheet) {
@@ -176,18 +216,26 @@ function listarAlumnos(sheet) {
   return result;
 }
 
-function obtenerRegistrosAsistencia(sheet, tz, paralelo, fecha) {
+function consultarAsistencia(sheet, tz, paralelo, fecha, incluirSesiones) {
   var registros = [];
+  var fechasMap = {};
+  var sesionesMap = {};
+  var fechaNorm = normalizeDate(fecha, tz);
   var targetSheet = sheet.getSheetByName(paralelo);
-  if (!targetSheet || targetSheet.getLastRow() <= 1) return registros;
+  if (!targetSheet || targetSheet.getLastRow() <= 1) {
+    return { registros: registros, fechas: [], sesiones: [] };
+  }
 
   var lastCol = Math.max(5, targetSheet.getLastColumn());
-  var data = targetSheet.getRange(1, 1, targetSheet.getLastRow(), Math.min(5, lastCol)).getDisplayValues();
+  var rango = targetSheet.getRange(1, 1, targetSheet.getLastRow(), Math.min(5, lastCol));
+  var data = rango.getValues();
+  var shown = rango.getDisplayValues();
+  var headers = data[0].map(function (h) { return String(h || "").trim(); });
   var colBanner = 1;
   var colNombre = 2;
   var colEstado = 3;
   var colNotas = 4;
-  if (data[0][1] !== "Banner" && data[0][1] !== "Código Banner") {
+  if (headers[1] !== "Banner" && headers[1] !== "Código Banner") {
     colBanner = -1;
     colNombre = 1;
     colEstado = 2;
@@ -195,52 +243,87 @@ function obtenerRegistrosAsistencia(sheet, tz, paralelo, fecha) {
   }
 
   for (var i = 1; i < data.length; i++) {
-    if (normalizeDate(data[i][0], tz) !== fecha) continue;
-    registros.push({
+    var d = fechaVisible(data[i][0], shown[i][0], tz);
+    var fila = {
       banner: colBanner >= 0 ? String(data[i][colBanner] || "") : "",
       estudiante: String(data[i][colNombre] || ""),
       estado: String(data[i][colEstado] || ""),
       notas: String(data[i][colNotas] || "")
+    };
+    if (fila.banner === MARCA_SESION) continue;
+    if (d) {
+      fechasMap[d] = true;
+      if (incluirSesiones) {
+        if (!sesionesMap[d]) sesionesMap[d] = [];
+        sesionesMap[d].push(fila);
+      }
+    }
+    if (!fechaNorm || !fechaCeldaCoincide(data[i][0], shown[i][0], tz, fechaNorm)) continue;
+    registros.push(fila);
+  }
+
+  var fechas = Object.keys(fechasMap).sort().reverse();
+  var out = { registros: registros, fechas: fechas };
+  if (incluirSesiones) {
+    out.sesiones = fechas.map(function (f) {
+      return { fecha: f, registros: sesionesMap[f] || [] };
     });
   }
-  return registros;
+  return out;
+}
+
+function obtenerRegistrosAsistencia(sheet, tz, paralelo, fecha) {
+  return consultarAsistencia(sheet, tz, paralelo, fecha).registros;
+}
+
+function fechaParaHoja(fecha, tz) {
+  var iso = normalizeDate(fecha, tz);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    throw new Error("Fecha inválida: " + fecha);
+  }
+  return Utilities.parseDate(iso, tz, "yyyy-MM-dd");
 }
 
 function escribirBloque(targetSheet, startRow, rows) {
   if (!rows.length) return;
-  targetSheet.getRange(startRow, 1, rows.length, 5).setValues(rows);
-  targetSheet.getRange(startRow, 1, rows.length, 2).setNumberFormat("@");
+  var numRows = rows.length;
+  targetSheet.getRange(startRow, 1, numRows, 1).setNumberFormat("yyyy-mm-dd");
+  targetSheet.getRange(startRow, 2, numRows, 1).setNumberFormat("@");
+  targetSheet.getRange(startRow, 1, numRows, 5).setValues(rows);
   var bgs = [];
   var fgs = [];
-  for (var i = 0; i < rows.length; i++) {
+  for (var i = 0; i < numRows; i++) {
     var est = rows[i][3];
     if (est === "Presente") {
-      bgs.push(["#10b981"]);
+      bgs.push([COLOR_PRESENTE]);
       fgs.push(["#FFFFFF"]);
     } else if (est === "Falta") {
-      bgs.push(["#ef4444"]);
+      bgs.push([COLOR_FALTA]);
       fgs.push(["#FFFFFF"]);
     } else if (est === "Atraso") {
-      bgs.push(["#f59e0b"]);
-      fgs.push(["#000000"]);
+      bgs.push([COLOR_ATRASO]);
+      fgs.push(["#FFFFFF"]);
     } else {
       bgs.push([null]);
       fgs.push([null]);
     }
   }
-  targetSheet.getRange(startRow, 4, rows.length, 1).setBackgrounds(bgs).setFontColors(fgs);
+  targetSheet.getRange(startRow, 4, numRows, 1).setBackgrounds(bgs).setFontColors(fgs);
 }
 
 function reemplazarAsistenciaFecha(targetSheet, tz, fecha, nuevasFilas) {
+  var fechaNorm = normalizeDate(fecha, tz);
   var lastRow = targetSheet.getLastRow();
   if (lastRow > 1) {
-    var dates = targetSheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+    var dateRange = targetSheet.getRange(2, 1, lastRow - 1, 1);
+    var dates = dateRange.getValues();
+    var shown = dateRange.getDisplayValues();
     var first = -1;
     var last = -1;
     var count = 0;
     var contiguous = true;
     for (var i = 0; i < dates.length; i++) {
-      if (normalizeDate(dates[i][0], tz) !== fecha) continue;
+      if (!fechaCeldaCoincide(dates[i][0], shown[i][0], tz, fechaNorm)) continue;
       if (first === -1) first = i;
       else if (i !== last + 1) contiguous = false;
       last = i;
@@ -250,22 +333,25 @@ function reemplazarAsistenciaFecha(targetSheet, tz, fecha, nuevasFilas) {
     if (count > 0 && contiguous) {
       targetSheet.deleteRows(first + 2, count);
     } else if (count > 0) {
-      var data = targetSheet.getRange(2, 1, lastRow - 1, 5).getDisplayValues();
+      var dataRange = targetSheet.getRange(2, 1, lastRow - 1, 5);
+      var data = dataRange.getValues();
+      var dataShown = dataRange.getDisplayValues();
       var kept = [];
       for (var r = 0; r < data.length; r++) {
-        if (normalizeDate(data[r][0], tz) === fecha) continue;
+        if (fechaCeldaCoincide(data[r][0], dataShown[r][0], tz, fechaNorm)) continue;
         kept.push([data[r][0], data[r][1], data[r][2], data[r][3], data[r][4]]);
       }
-      targetSheet.getRange(2, 1, lastRow - 1, 5).clearContent();
+      dataRange.clearContent();
       if (kept.length) {
         targetSheet.getRange(2, 1, kept.length, 5).setValues(kept);
       }
     }
   }
 
-  if (!nuevasFilas.length) return;
-  var start = Math.max(2, targetSheet.getLastRow() + 1);
-  escribirBloque(targetSheet, start, nuevasFilas);
+  if (nuevasFilas.length) {
+    var start = Math.max(2, targetSheet.getLastRow() + 1);
+    escribirBloque(targetSheet, start, nuevasFilas);
+  }
 }
 
 function doGet(e) {
@@ -274,16 +360,18 @@ function doGet(e) {
   var params = e && e.parameter ? e.parameter : {};
 
   if (params.action === "obtener_asistencia") {
-    return jsonOut({
-      registros: obtenerRegistrosAsistencia(sheet, tz, params.paralelo, params.fecha)
-    });
+    var todo = params.todo === "1";
+    var consulta = consultarAsistencia(sheet, tz, params.paralelo, todo ? "" : params.fecha, todo);
+    return jsonOut(consulta);
   }
 
   var result = listarAlumnos(sheet);
   if (params.incluir_asistencia === "1" && params.fecha) {
     var paraleloAsistencia = params.paralelo || result.paralelos[0];
     if (paraleloAsistencia) {
-      result.registros = obtenerRegistrosAsistencia(sheet, tz, paraleloAsistencia, params.fecha);
+      var extra = consultarAsistencia(sheet, tz, paraleloAsistencia, params.fecha);
+      result.registros = extra.registros;
+      result.fechas = extra.fechas;
     }
   }
   return jsonOut(result);
@@ -295,8 +383,21 @@ function doPost(e) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet();
     var tz = sheet.getSpreadsheetTimeZone();
+    if (!e || !e.postData || !e.postData.contents) {
+      return jsonOut({ status: "error", message: "Sin datos" });
+    }
     var payload = JSON.parse(e.postData.contents);
     var action = payload.action;
+
+    if (action === "crear_paralelo") {
+      var creado = crearParalelo(sheet, payload.paralelo);
+      if (creado.status === "error") return jsonOut(creado);
+    }
+
+    if (action === "eliminar_paralelo") {
+      var eliminado = eliminarParalelo(sheet, payload.paralelo);
+      if (eliminado.status === "error") return jsonOut(eliminado);
+    }
 
     if (action === "agregar_alumno") {
       asegurarHojaEstudiantes(sheet).appendRow([payload.paralelo, payload.banner, payload.nombre]);
@@ -320,20 +421,28 @@ function doPost(e) {
     }
 
     if (action === "guardar_asistencia") {
+      var fechaIso = normalizeDate(payload.fecha, tz);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
+        return jsonOut({ status: "error", message: "Fecha inválida: " + payload.fecha });
+      }
+      var fechaHoja = fechaParaHoja(fechaIso, tz);
       var targetSheet = asegurarHojaAsistencia(sheet, payload.paralelo);
       var nuevasFilas = (payload.registros || []).map(function (reg) {
         return [
-          payload.fecha,
+          fechaHoja,
           String(reg.banner || ""),
           String(reg.estudiante || ""),
           String(reg.estado || ""),
           String(reg.notas || "")
         ];
       });
-      reemplazarAsistenciaFecha(targetSheet, tz, payload.fecha, nuevasFilas);
+      reemplazarAsistenciaFecha(targetSheet, tz, fechaIso, nuevasFilas);
+      return jsonOut({ status: "ok", fecha: fechaIso, filas: nuevasFilas.length });
     }
 
     return jsonOut({ status: "ok" });
+  } catch (err) {
+    return jsonOut({ status: "error", message: String(err && err.message ? err.message : err) });
   } finally {
     lock.releaseLock();
   }
@@ -402,12 +511,266 @@ function editarAlumno(sheet, tz, payload) {
   }
 }
 
+function nombreParaleloValido(nombre) {
+  var n = String(nombre || "").trim();
+  if (!n) return { ok: false, message: "El nombre del horario está vacío." };
+  if (esHojaIgnorada(n)) return { ok: false, message: "Ese nombre está reservado." };
+  if (/[\[\]\*\/\\\?\:]/.test(n)) return { ok: false, message: "El nombre no puede incluir [ ] * / \\ ? :" };
+  if (n.length > 80) return { ok: false, message: "El nombre es demasiado largo." };
+  return { ok: true, nombre: n };
+}
+
+function crearParalelo(sheet, nombre) {
+  var check = nombreParaleloValido(nombre);
+  if (!check.ok) return { status: "error", message: check.message };
+  if (sheet.getSheetByName(check.nombre)) {
+    return { status: "error", message: "Ya existe un horario con ese nombre." };
+  }
+  asegurarHojaAsistencia(sheet, check.nombre);
+  actualizarValidacionParalelos(sheet);
+  guardarNombresHojas(sheet);
+  return { status: "ok" };
+}
+
+function eliminarParalelo(sheet, nombre) {
+  var check = nombreParaleloValido(nombre);
+  if (!check.ok) return { status: "error", message: check.message };
+  var target = sheet.getSheetByName(check.nombre);
+  if (!target) return { status: "error", message: "No se encontró ese horario." };
+  if (sheet.getSheets().length <= 1) {
+    return { status: "error", message: "No se puede borrar la única hoja del libro." };
+  }
+
+  var estSheet = sheet.getSheetByName("Estudiantes");
+  if (estSheet && estSheet.getLastRow() > 1) {
+    var estData = estSheet.getRange(2, 1, estSheet.getLastRow() - 1, 3).getValues();
+    for (var i = estData.length - 1; i >= 0; i--) {
+      if (String(estData[i][0] || "").trim() === check.nombre) {
+        estSheet.deleteRow(i + 2);
+      }
+    }
+  }
+
+  sheet.deleteSheet(target);
+  actualizarValidacionParalelos(sheet);
+  guardarNombresHojas(sheet);
+  return { status: "ok" };
+}
+
+function esFilaSesion(banner) {
+  return String(banner || "") === MARCA_SESION;
+}
+
+function fechaHumanaGs(iso) {
+  var partes = String(iso || "").split("-");
+  if (partes.length !== 3) return String(iso || "");
+  return partes[2] + "/" + partes[1] + "/" + partes[0];
+}
+
+function diaSemanaGs(iso) {
+  var partes = String(iso || "").split("-");
+  if (partes.length !== 3) return "";
+  var fecha = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+  return DIAS_SEMANA[fecha.getDay()] || "";
+}
+
+function resumenFilas(filas) {
+  var p = 0;
+  var a = 0;
+  var f = 0;
+  for (var i = 0; i < filas.length; i++) {
+    var est = String(filas[i][3] || "");
+    if (est === "Presente") p++;
+    else if (est === "Atraso") a++;
+    else if (est === "Falta") f++;
+  }
+  return filas.length + " alumnos  ·  " + p + " P   " + a + " A   " + f + " F";
+}
+
+function limpiarGruposFilas(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return;
+  for (var i = 0; i < 4; i++) {
+    try {
+      sheet.getRange(2, 1, last - 1, 1).shiftRowGroupDepth(-1);
+    } catch (e) {
+      break;
+    }
+  }
+}
+
+function organizarVistaAsistencia(targetSheet, tz, fechaAbierta) {
+  var lastRow = targetSheet.getLastRow();
+  if (lastRow < 2) {
+    targetSheet.setFrozenRows(1);
+    return;
+  }
+
+  limpiarGruposFilas(targetSheet);
+
+  var lastCol = Math.max(5, targetSheet.getLastColumn());
+  var rango = targetSheet.getRange(2, 1, lastRow - 1, Math.min(5, lastCol));
+  var data = rango.getValues();
+  var shown = rango.getDisplayValues();
+  var grupos = {};
+  var orden = [];
+
+  for (var i = 0; i < data.length; i++) {
+    if (esFilaSesion(data[i][1])) continue;
+    var d = fechaVisible(data[i][0], shown[i][0], tz);
+    if (!d) continue;
+    if (!grupos[d]) {
+      grupos[d] = [];
+      orden.push(d);
+    }
+    grupos[d].push([data[i][0], data[i][1], data[i][2], data[i][3], data[i][4]]);
+  }
+
+  orden.sort().reverse();
+  if (!orden.length) return;
+
+  orden.forEach(function (iso) {
+    grupos[iso].sort(function (a, b) {
+      return String(a[2] || "").localeCompare(String(b[2] || ""), "es", { sensitivity: "base" });
+    });
+  });
+
+  var filas = [];
+  var bloques = [];
+  for (var g = 0; g < orden.length; g++) {
+    var iso = orden[g];
+    var alumnos = grupos[iso];
+    var inicio = filas.length + 2;
+    filas.push([
+      fechaParaHoja(iso, tz),
+      MARCA_SESION,
+      fechaHumanaGs(iso) + "  ·  " + diaSemanaGs(iso) + "  ·  " + resumenFilas(alumnos),
+      "",
+      ""
+    ]);
+    for (var a = 0; a < alumnos.length; a++) filas.push(alumnos[a]);
+    bloques.push({
+      iso: iso,
+      headerRow: inicio,
+      firstStudent: inicio + 1,
+      count: alumnos.length,
+      stripe: g % 2 === 0
+    });
+  }
+
+  var destino = targetSheet.getRange(2, 1, filas.length, 5);
+  destino.setNumberFormats(filas.map(function (fila) {
+    return ["yyyy-mm-dd", esFilaSesion(fila[1]) ? ";;;" : "@", "@", "@", "@"];
+  }));
+  destino.setValues(filas);
+
+  var sobra = targetSheet.getLastRow() - (filas.length + 1);
+  if (sobra > 0) {
+    targetSheet.getRange(filas.length + 2, 1, sobra, 5).clearContent().clearFormat();
+  }
+
+  var fondos = [];
+  var fuentes = [];
+  var pesos = [];
+  var fondosEstado = [];
+  var fuentesEstado = [];
+  for (var b = 0; b < bloques.length; b++) {
+    var bloque = bloques[b];
+    var tono = bloque.stripe ? COLOR_DIA_A : COLOR_DIA_B;
+    fondos.push([COLOR_SESION, COLOR_SESION, COLOR_SESION, COLOR_SESION, COLOR_SESION]);
+    fuentes.push(["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]);
+    pesos.push(["bold", "bold", "bold", "bold", "bold"]);
+    fondosEstado.push([COLOR_SESION]);
+    fuentesEstado.push(["#ffffff"]);
+    for (var s = 0; s < bloque.count; s++) {
+      fondos.push([tono, tono, tono, null, tono]);
+      fuentes.push(["#1e293b", "#1e293b", "#1e293b", null, "#1e293b"]);
+      pesos.push(["normal", "normal", "normal", "normal", "normal"]);
+      var est = String(filas[bloque.firstStudent - 2 + s][3] || "");
+      if (est === "Presente") {
+        fondosEstado.push([COLOR_PRESENTE]);
+        fuentesEstado.push(["#ffffff"]);
+      } else if (est === "Falta") {
+        fondosEstado.push([COLOR_FALTA]);
+        fuentesEstado.push(["#ffffff"]);
+      } else if (est === "Atraso") {
+        fondosEstado.push([COLOR_ATRASO]);
+        fuentesEstado.push(["#ffffff"]);
+      } else {
+        fondosEstado.push([tono]);
+        fuentesEstado.push(["#1e293b"]);
+      }
+    }
+  }
+
+  destino.setBackgrounds(fondos);
+  destino.setFontColors(fuentes);
+  destino.setFontWeights(pesos);
+  targetSheet.getRange(2, 4, filas.length, 1).setBackgrounds(fondosEstado).setFontColors(fuentesEstado);
+
+  targetSheet.getRange(1, 1, 1, 5)
+    .setFontWeight("bold")
+    .setBackground("#0b1220")
+    .setFontColor("#f8fafc");
+  targetSheet.setFrozenRows(1);
+  targetSheet.setColumnWidth(1, 110);
+  targetSheet.setColumnWidth(2, 100);
+  targetSheet.setColumnWidth(3, 360);
+  targetSheet.setColumnWidth(4, 100);
+  targetSheet.setColumnWidth(5, 180);
+
+  var abierta = fechaAbierta || orden[0];
+  for (var k = 0; k < bloques.length; k++) {
+    if (bloques[k].count < 1) continue;
+    var grupoRango = targetSheet.getRange(bloques[k].firstStudent, 1, bloques[k].count, 1);
+    grupoRango.shiftRowGroupDepth(1);
+    try {
+      var grupo = targetSheet.getRowGroup(bloques[k].firstStudent, 1);
+      if (bloques[k].iso === abierta) grupo.expand();
+      else grupo.collapse();
+    } catch (e2) {}
+  }
+}
+
+function fechaVisible(valor, mostrado, tz) {
+  return normalizeDate(mostrado, tz) || normalizeDate(valor, tz);
+}
+
+function fechaCeldaCoincide(valor, mostrado, tz, fechaNorm) {
+  if (!fechaNorm) return false;
+  if (normalizeDate(mostrado, tz) === fechaNorm) return true;
+  if (normalizeDate(valor, tz) === fechaNorm) return true;
+  if (Object.prototype.toString.call(valor) === "[object Date]" && !isNaN(valor.getTime())) {
+    if (Utilities.formatDate(valor, "UTC", "yyyy-MM-dd") === fechaNorm) return true;
+  }
+  return false;
+}
+
 function normalizeDate(val, tz) {
-  if (!val) return "";
-  if (val instanceof Date) return Utilities.formatDate(val, tz, "yyyy-MM-dd");
+  if (val === null || val === undefined || val === "") return "";
+  var zone = tz || Session.getScriptTimeZone();
+  if (Object.prototype.toString.call(val) === "[object Date]" && !isNaN(val.getTime())) {
+    var local = Utilities.formatDate(val, zone, "yyyy-MM-dd");
+    var utc = Utilities.formatDate(val, "UTC", "yyyy-MM-dd");
+    return local || utc;
+  }
   var str = String(val).trim();
+  if (!str) return "";
   if (str.indexOf("T") !== -1) str = str.split("T")[0];
-  var match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (match) return match[0];
-  return str;
+  var iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
+  var slash = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if (slash) {
+    var a = parseInt(slash[1], 10);
+    var b = parseInt(slash[2], 10);
+    var y = slash[3];
+    var day = a;
+    var month = b;
+    if (b > 12 && a <= 12) {
+      month = a;
+      day = b;
+    }
+    return y + "-" + ("0" + month).slice(-2) + "-" + ("0" + day).slice(-2);
+  }
+  return "";
 }
